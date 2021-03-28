@@ -28,9 +28,12 @@ class EtherCatPacket
 {
 private:
     std::array<char, 2048> data;
-
+    int len = 0;
+    
 public:
+    void write(int fd);
     void read(int fd);
+    void create_heartbeat();
 };
 
 
@@ -38,6 +41,7 @@ class EtherCat
 {
 private:
     Select select;
+    int sock_raw;
 
 public:
     EtherCat();
@@ -45,6 +49,11 @@ public:
     ~EtherCat()
     {
     }
+
+    void master();
+    void slave();
+
+    void send_heartbeat();
 
     void process_packet()
     {
