@@ -1,103 +1,30 @@
 #include "ethercat.h"
+#include "netinet/in.h"
 
-void Select::add(int fd, callback_t &&callback)
+void EtherCatPacket::read(int fd)
 {
-    max_fd = std::max(fd, max_fd);
-    fd_vals.push_back(std::make_pair(fd, std::move(callback)));
+    auto ret = ::read(fd, data.data(), data.size());
+    printf("read %d bytes\n", (int)ret);
+
+    struct ethhdr *eth = (struct ethhdr *)(data.data());
+    printf("\nEthernet Header\n");
+    printf("\t|-Source Address : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X\n", eth->h_source[0], eth->h_source[1], eth->h_source[2], eth->h_source[3], eth->h_source[4], eth->h_source[5]);
+    printf("\t|-Destination Address : %.2X-%.2X-%.2X-%.2X-%.2X-%.2X\n", eth->h_dest[0], eth->h_dest[1], eth->h_dest[2], eth->h_dest[3], eth->h_dest[4], eth->h_dest[5]);
+    printf("\t|-Protocol : %d\n", eth->h_proto);
 }
 
-void Select::wait()
-{
-    fd_set rfds;
-    FD_ZERO(&rfds);
-    for (int i = 0; i < fd_vals.size(); i++)
-    {
-        int fd = fd_vals[i].first;
-        FD_SET(fd, &rfds);
-    }
-    fprintf(stderr, "start-select: %d\n", max_fd + 1);
-    int ret = ::select(max_fd + 1, &rfds, NULL, NULL, NULL);
-    if (ret < 0)
-    {
-        if (errno == EINTR)
-        {
-            fprintf(stderr, "EINTR\n");
-            return;
-        }
 
-        perror("select()");
+EtherCat::EtherCat()
+{
+    int sock_r = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ECAT));
+    if (sock_r < 0)
+    {
+        perror("error in socket\n");
         return;
     }
 
-    fprintf(stderr, "start-select-ret: %d\n", ret);
-    for (int i = 0; i < fd_vals.size(); i++)
-    {
-        int fd = fd_vals[i].first;
-        if (FD_ISSET(fd, &rfds))
-        {
-            fd_vals[i].second();
-        }
-    }
-}
-
-EtherCatQueue::EtherCatQueue(Select &select)
-{
-    if ((fd = open(TUN_DEV, O_RDWR)) < 0)
-    {
-        throw std::runtime_error("failed to open device");
-    }
-
-    select.add(fd, [this]() {
-        fprintf(stderr, "processing packet\n");
+    select.add(sock_r, [sock_r]() {
         EtherCatPacket pkt;
-        pkt.read(fd);
+        pkt.read(sock_r);
     });
-
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
-
-    /* Flags: IFF_TUN - TUN device (no Ethernet headers) 
-       *        IFF_TAP   - TAP device 
-       *        IFF_NO_PI - Do not provide packet information  
-       */
-    ifr.ifr_flags = IFF_TAP | IFF_MULTI_QUEUE;
-    //if (eth_src_dev != "")
-    {
-        strncpy(ifr.ifr_name,
-                //"enp0s3",
-                eth_src_dev.c_str(),
-                IFNAMSIZ);
-    }
-
-    int err;
-    if ((err = ioctl(fd, TUNSETIFF, (void *)&ifr)) < 0)
-    {
-        close(fd);
-        throw std::runtime_error("failed to set tun name");
-    }
-    fprintf(stderr, "ethercat = %s\n", ifr.ifr_name);
-    eth_src_dev = ifr.ifr_name;
-}
-
-int EtherCatQueue::enable_queue(bool enable)
-{
-    struct ifreq ifr;
-
-    memset(&ifr, 0, sizeof(ifr));
-
-    if (enable)
-        ifr.ifr_flags = IFF_ATTACH_QUEUE;
-    else
-        ifr.ifr_flags = IFF_DETACH_QUEUE;
-
-    return ioctl(fd, TUNSETQUEUE, (void *)&ifr);
-}
-
-EtherCat::EtherCat(unsigned num_queues)
-{
-    for (auto i = 0; i < num_queues; i++)
-    {
-        auto aa = std::make_unique<EtherCatQueue>(select);
-        queues.emplace_back(std::move(aa));
-    }
 }

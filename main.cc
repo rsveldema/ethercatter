@@ -5,7 +5,7 @@ int main()
 {
     try
     {
-        EtherCat ethercat(1);
+        EtherCat ethercat;
 
         while (1)
         {
